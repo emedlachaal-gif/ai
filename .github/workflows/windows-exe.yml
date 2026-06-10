@@ -1,0 +1,35 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    name: Build BlockHaven3D.exe
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore
+        run: dotnet restore BlockHaven3D.sln
+
+      - name: Build
+        run: dotnet build BlockHaven3D.sln -c Release --no-restore
+
+      - name: Publish Windows single-file EXE
+        run: dotnet publish src/BlockHaven3D/BlockHaven3D.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o Builds/Windows
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlockHaven3D-windows-x64
+          path: Builds/Windows/**
