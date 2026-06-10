@@ -197,8 +197,9 @@ public sealed class BlockHavenGame : GameWindow
     {
         if (_world.Raycast(_camera.Position, _camera.Front, 8, out var hit, out _))
         {
+            var brokenType = _world.GetBlock(hit);
             _world.SetBlock(hit, BlockType.Air, true);
-            if (!_creative) _player.Add(_world.GetBlock(hit), 1);
+            if (!_creative && brokenType != BlockType.Air) _player.Add(brokenType, 1);
         }
     }
 
@@ -593,7 +594,7 @@ public sealed class Vehicle
         var max = Kind == VehicleKind.Airplane ? 70f : Kind == VehicleKind.Motorcycle ? 22f : 18f;
         Speed = Math.Clamp(Speed + throttle * max * 0.85f * dt, -8f, max);
         if (brake) Speed *= MathF.Pow(0.05f, dt);
-        Yaw += steer * (Kind == VehicleKind.Airplane ? 30f : 95f) * dt * MathF.Clamp(MathF.Abs(Speed) / 8f, 0.2f, 1.4f);
+        Yaw += steer * (Kind == VehicleKind.Airplane ? 30f : 95f) * dt * Math.Clamp(MathF.Abs(Speed) / 8f, 0.2f, 1.4f);
         var dir = new Vector3(MathF.Cos(MathHelper.DegreesToRadians(Yaw)), 0, MathF.Sin(MathHelper.DegreesToRadians(Yaw)));
         Position += dir * Speed * dt;
         if (Kind == VehicleKind.Airplane && (RequestTakeoff || Speed > 38f)) Position += Vector3.UnitY * Math.Clamp((Speed - 32f) * 0.18f, 0, 6f) * dt;
@@ -660,7 +661,7 @@ public sealed class NpcManager
                 >= 17 and < 19 => new Vector3(24, 1, -24),
                 _ => npc.Home + new Vector3(3, 0, 3)
             };
-            npc.State = Vector3.Distance(target, npc.Position) < 1.5f ? (hour >= 22 or < 6 ? NpcState.Sleep : hour >= 8 and < 16 ? NpcState.Work : NpcState.Shop) : NpcState.Travel;
+            npc.State = Vector3.Distance(target, npc.Position) < 1.5f ? (hour >= 22 || hour < 6 ? NpcState.Sleep : hour >= 8 && hour < 16 ? NpcState.Work : NpcState.Shop) : NpcState.Travel;
             if (npc.State == NpcState.Travel)
             {
                 var delta = target - npc.Position;
