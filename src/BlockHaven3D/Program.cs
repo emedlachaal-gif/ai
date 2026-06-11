@@ -38,8 +38,10 @@ public sealed class BlockHavenGame : GameWindow
     private readonly List<Vehicle> _vehicles = [];
     private PlayerState _player = PlayerState.CreateDefault();
     private Camera _camera = null!;
-    private bool _creative = true;
+    private bool _creative;
     private bool _paused;
+    private float _verticalVelocity;
+    private bool _grounded;
     private double _autosaveTimer;
     private double _worldClock = 8.0;
     private float _sun;
@@ -59,6 +61,8 @@ public sealed class BlockHavenGame : GameWindow
         GL.Enable(EnableCap.DepthTest);
         GL.Enable(EnableCap.CullFace);
         GL.CullFace(CullFaceMode.Back);
+        GL.Enable(EnableCap.Blend);
+        GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
         GL.ClearColor(0.52f, 0.75f, 0.98f, 1f);
 
         _shader = new ShaderProgram(VertexShaderSource, FragmentShaderSource);
@@ -103,7 +107,11 @@ public sealed class BlockHavenGame : GameWindow
         UpdateMouseLook();
         if (KeyboardState.IsKeyPressed(Keys.F5)) _save.SaveAll(_world, _economy, _npcs, _vehicles, CapturePlayer());
         if (KeyboardState.IsKeyPressed(Keys.F1)) _creative = !_creative;
-        if (KeyboardState.IsKeyPressed(Keys.E)) ToggleNearestVehicle();
+        if (KeyboardState.IsKeyPressed(Keys.E))
+        {
+            if (_drivenVehicle is not null) ToggleNearestVehicle();
+            else if (!_world.ToggleNearestDoor(_camera.Position)) ToggleNearestVehicle();
+        }
         if (KeyboardState.IsKeyPressed(Keys.H)) TryBuyNearestHouse();
         if (KeyboardState.IsKeyPressed(Keys.J)) _economy.PayJobSalary("Livreur", 125);
         if (KeyboardState.IsKeyPressed(Keys.D1)) _player.SelectedBlock = BlockType.Dirt;
@@ -115,6 +123,7 @@ public sealed class BlockHavenGame : GameWindow
         if (MouseState.IsButtonPressed(MouseButton.Left)) BreakBlock();
         if (MouseState.IsButtonPressed(MouseButton.Right)) PlaceBlock();
 
+        _world.UpdateDoors(dt);
         _worldClock = (_worldClock + dt / 90.0) % 24.0;
         _sun = MathF.Max(0.16f, MathF.Sin((float)(_worldClock / 24.0 * MathHelper.TwoPi)) * 0.5f + 0.5f);
         _npcs.Update(dt, _worldClock, _vehicles);
@@ -126,19 +135,23 @@ public sealed class BlockHavenGame : GameWindow
             _autosaveTimer = 0;
             _save.SaveAll(_world, _economy, _npcs, _vehicles, CapturePlayer());
         }
-        Title = $"BlockHaven 3D | Argent ${_economy.PlayerMoney} | Mode {(_creative ? "Creatif" : "Survie")} | Bloc {_player.SelectedBlock} | Heure {_worldClock:00.0}h | E: vehicule H: maison F5: save";
+        Title = $"BlockHaven 3D | Argent ${_economy.PlayerMoney} | Mode {(_creative ? "Creatif" : "Survie")} | Bloc {_player.SelectedBlock} | Heure {_worldClock:00.0}h | E: porte/vehicule H: maison F5: save";
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
+        var sky = new Vector3(0.015f, 0.02f, 0.055f) + (new Vector3(0.56f, 0.75f, 0.96f) - new Vector3(0.015f, 0.02f, 0.055f)) * _sun;
+        GL.ClearColor(sky.X, sky.Y, sky.Z, 1f);
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         _shader.Use();
         var projection = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(74f), Size.X / (float)Size.Y, 0.05f, 600f);
         _shader.SetMatrix4("projection", projection);
         _shader.SetMatrix4("view", _camera.GetViewMatrix());
         _shader.SetVector3("lightDir", Vector3.Normalize(new Vector3(-0.35f, -1f, -0.25f)));
+        _shader.SetVector3("viewPos", _camera.Position);
         _shader.SetFloat("dayLight", _sun);
+        _shader.SetFloat("time", (float)GLFW.GetTime());
 
         foreach (var block in _world.VisibleBlocksAround(_camera.Position, 95))
         {
@@ -146,6 +159,7 @@ public sealed class BlockHavenGame : GameWindow
             if (block.Type == BlockType.Water) color = new Vector4(0.1f, 0.45f + MathF.Sin((float)GLFW.GetTime() * 2f) * 0.06f, 0.9f, 0.72f);
             _cube.Draw(block.Position, Vector3.One, color);
         }
+        RenderSunAndMoon();
         RenderCityDetails();
         foreach (var vehicle in _vehicles) RenderVehicle(vehicle);
         foreach (var npc in _npcs.Npcs) RenderNpc(npc);
@@ -169,16 +183,43 @@ public sealed class BlockHavenGame : GameWindow
     private void UpdateWalking(float dt)
     {
         var speed = KeyboardState.IsKeyDown(Keys.LeftShift) ? 11f : 6f;
-        var velocity = Vector3.Zero;
-        if (KeyboardState.IsKeyDown(Keys.W) || KeyboardState.IsKeyDown(Keys.Z)) velocity += _camera.FrontFlat;
-        if (KeyboardState.IsKeyDown(Keys.S)) velocity -= _camera.FrontFlat;
-        if (KeyboardState.IsKeyDown(Keys.A) || KeyboardState.IsKeyDown(Keys.Q)) velocity -= _camera.RightFlat;
-        if (KeyboardState.IsKeyDown(Keys.D)) velocity += _camera.RightFlat;
-        if (KeyboardState.IsKeyDown(Keys.Space)) velocity += Vector3.UnitY;
-        if (KeyboardState.IsKeyDown(Keys.LeftControl)) velocity -= Vector3.UnitY;
-        if (velocity.LengthSquared > 0.001f) _camera.Position += Vector3.Normalize(velocity) * speed * dt;
-        var ground = _world.HeightAt((int)MathF.Floor(_camera.Position.X), (int)MathF.Floor(_camera.Position.Z)) + 1.75f;
-        if (_camera.Position.Y < ground) _camera.Position = new Vector3(_camera.Position.X, ground, _camera.Position.Z);
+        var horizontal = Vector3.Zero;
+        if (KeyboardState.IsKeyDown(Keys.W) || KeyboardState.IsKeyDown(Keys.Z)) horizontal += _camera.FrontFlat;
+        if (KeyboardState.IsKeyDown(Keys.S)) horizontal -= _camera.FrontFlat;
+        if (KeyboardState.IsKeyDown(Keys.A) || KeyboardState.IsKeyDown(Keys.Q)) horizontal -= _camera.RightFlat;
+        if (KeyboardState.IsKeyDown(Keys.D)) horizontal += _camera.RightFlat;
+        if (horizontal.LengthSquared > 0.001f) _camera.Position += Vector3.Normalize(horizontal) * speed * dt;
+
+        if (_creative)
+        {
+            var fly = 0f;
+            if (KeyboardState.IsKeyDown(Keys.Space)) fly += 1f;
+            if (KeyboardState.IsKeyDown(Keys.LeftControl)) fly -= 1f;
+            if (MathF.Abs(fly) > 0.01f) _camera.Position += Vector3.UnitY * fly * speed * dt;
+        }
+        else
+        {
+            if (_grounded && KeyboardState.IsKeyPressed(Keys.Space))
+            {
+                _verticalVelocity = 8.25f;
+                _grounded = false;
+            }
+            _verticalVelocity -= 24f * dt;
+            _verticalVelocity = Math.Max(_verticalVelocity, -42f);
+            _camera.Position += Vector3.UnitY * _verticalVelocity * dt;
+        }
+
+        var ground = _world.EyeHeightAt(_camera.Position.X, _camera.Position.Z, _camera.Position.Y);
+        if (_camera.Position.Y <= ground)
+        {
+            _camera.Position = new Vector3(_camera.Position.X, ground, _camera.Position.Z);
+            _verticalVelocity = 0f;
+            _grounded = true;
+        }
+        else
+        {
+            _grounded = false;
+        }
     }
 
     private void UpdateVehicleDriving(float dt)
@@ -248,6 +289,23 @@ public sealed class BlockHavenGame : GameWindow
     private void RenderCityDetails()
     {
         foreach (var sign in _world.Signs) _cube.Draw(sign.Position, sign.Scale, sign.Color);
+        foreach (var door in _world.Doors)
+        {
+            var swing = 86f * door.OpenAmount;
+            var yaw = door.Yaw + swing;
+            var offset = new Vector3(MathF.Sin(MathHelper.DegreesToRadians(yaw)) * 0.42f, 0, MathF.Cos(MathHelper.DegreesToRadians(yaw)) * 0.42f);
+            _cube.DrawRotated(door.Position + offset, new Vector3(0.12f, 2.15f, 0.86f), door.IsOpen ? new Vector4(0.75f, 0.48f, 0.22f, 1) : new Vector4(0.45f, 0.22f, 0.08f, 1), yaw);
+            _cube.DrawRotated(door.Position + offset + new Vector3(0, 0.12f, 0), new Vector3(0.16f, 0.12f, 0.16f), new Vector4(0.95f, 0.72f, 0.25f, 1), yaw);
+        }
+    }
+
+    private void RenderSunAndMoon()
+    {
+        var angle = (float)(_worldClock / 24.0 * MathHelper.TwoPi);
+        var sunPos = _camera.Position + new Vector3(MathF.Cos(angle) * 120f, MathF.Sin(angle) * 95f + 30f, -80f);
+        var moonPos = _camera.Position - new Vector3(MathF.Cos(angle) * 120f, MathF.Sin(angle) * 95f + 30f, -80f);
+        _cube.Draw(sunPos, new Vector3(8f, 8f, 8f), new Vector4(1f, 0.82f, 0.28f, 1));
+        _cube.Draw(moonPos, new Vector3(5f, 5f, 5f), new Vector4(0.68f, 0.74f, 0.9f, 1));
     }
 
     private void RenderVehicle(Vehicle v)
@@ -296,15 +354,30 @@ in vec3 WorldPos;
 out vec4 FragColor;
 uniform vec4 objectColor;
 uniform vec3 lightDir;
+uniform vec3 viewPos;
 uniform float dayLight;
+uniform float time;
+float hash(vec3 p)
+{
+    return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+}
+
 void main()
 {
-    float diffuse = max(dot(normalize(Normal), -lightDir), 0.0);
-    float ambient = 0.22 + dayLight * 0.28;
-    float fog = clamp(length(WorldPos.xz) / 260.0, 0.0, 0.55);
-    vec3 lit = objectColor.rgb * (ambient + diffuse * (0.45 + dayLight * 0.35));
-    vec3 sky = mix(vec3(0.04, 0.06, 0.13), vec3(0.55, 0.75, 0.95), dayLight);
-    FragColor = vec4(mix(lit, sky, fog), objectColor.a);
+    vec3 n = normalize(Normal);
+    vec3 viewDir = normalize(viewPos - WorldPos);
+    vec3 halfDir = normalize(-lightDir + viewDir);
+    float diffuse = max(dot(n, -lightDir), 0.0);
+    float specular = pow(max(dot(n, halfDir), 0.0), 48.0) * 0.18 * objectColor.a;
+    float ambient = 0.18 + dayLight * 0.28;
+    float grain = hash(floor(WorldPos * 2.5)) * 0.075 - 0.035;
+    float edge = smoothstep(0.46, 0.5, max(max(abs(fract(WorldPos.x) - 0.5), abs(fract(WorldPos.y) - 0.5)), abs(fract(WorldPos.z) - 0.5)));
+    vec3 textured = objectColor.rgb + vec3(grain) - vec3(edge * 0.055);
+    vec3 warmSun = mix(vec3(0.7, 0.78, 1.0), vec3(1.0, 0.92, 0.76), dayLight);
+    vec3 lit = textured * (ambient + diffuse * (0.42 + dayLight * 0.5)) * warmSun + vec3(specular);
+    float fog = clamp(length(viewPos.xz - WorldPos.xz) / 280.0, 0.0, 0.62);
+    vec3 sky = mix(vec3(0.015, 0.02, 0.055), vec3(0.56, 0.75, 0.96), dayLight);
+    FragColor = vec4(mix(pow(max(lit, vec3(0.0)), vec3(1.0 / 2.2)), sky, fog), objectColor.a);
 }
 """;
 }
@@ -347,6 +420,15 @@ public sealed class HouseLot
 }
 public sealed record WorkPlace(string Id, string Role, Vector3 Position);
 public sealed record DetailCube(Vector3 Position, Vector3 Scale, Vector4 Color);
+public sealed class Door
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public Vector3 Position { get; set; }
+    public float Yaw { get; set; }
+    public bool IsOpen { get; set; }
+    public float OpenAmount { get; set; }
+}
+public sealed record DoorSave(bool IsOpen, float OpenAmount);
 
 public sealed class WorldManager
 {
@@ -356,6 +438,7 @@ public sealed class WorldManager
     public List<HouseLot> CityHomes { get; private set; } = [];
     public List<WorkPlace> Workplaces { get; } = [];
     public List<DetailCube> Signs { get; } = [];
+    public List<Door> Doors { get; } = [];
     public IReadOnlyList<Vector3> RoadPoints { get; private set; } = [];
     public IReadOnlyDictionary<Vector3i, BlockType> ModifiedBlocks => _overrides;
     public WorldManager(int seed) => _seed = seed;
@@ -371,6 +454,42 @@ public sealed class WorldManager
     }
 
     public Dictionary<string, string> SaveModifiedBlocks() => _overrides.ToDictionary(k => $"{k.Key.X},{k.Key.Y},{k.Key.Z}", v => v.Value.ToString());
+
+    public void ApplyDoorStates(Dictionary<string, DoorSave>? states)
+    {
+        if (states is null) return;
+        foreach (var door in Doors)
+        {
+            if (!states.TryGetValue(door.Id, out var state)) continue;
+            door.IsOpen = state.IsOpen;
+            door.OpenAmount = Math.Clamp(state.OpenAmount, 0f, 1f);
+        }
+    }
+
+    public Dictionary<string, DoorSave> SaveDoorStates() => Doors.ToDictionary(d => d.Id, d => new DoorSave(d.IsOpen, d.OpenAmount));
+
+    public void UpdateDoors(float dt)
+    {
+        foreach (var door in Doors)
+        {
+            var target = door.IsOpen ? 1f : 0f;
+            door.OpenAmount = MoveTowards(door.OpenAmount, target, dt * 3.8f);
+        }
+    }
+
+    public bool ToggleNearestDoor(Vector3 playerPosition)
+    {
+        var door = Doors.Where(d => Vector3.Distance(d.Position, playerPosition) < 3.2f).OrderBy(d => Vector3.Distance(d.Position, playerPosition)).FirstOrDefault();
+        if (door is null) return false;
+        door.IsOpen = !door.IsOpen;
+        return true;
+    }
+
+    private static float MoveTowards(float current, float target, float maxDelta)
+    {
+        if (MathF.Abs(target - current) <= maxDelta) return target;
+        return current + MathF.Sign(target - current) * maxDelta;
+    }
 
     public void GenerateSpawnCityAndAirport()
     {
@@ -420,6 +539,19 @@ public sealed class WorldManager
         return BlockType.Stone;
     }
 
+    public float EyeHeightAt(float x, float z, float currentEyeY)
+    {
+        var bx = (int)MathF.Floor(x);
+        var bz = (int)MathF.Floor(z);
+        var start = Math.Clamp((int)MathF.Floor(currentEyeY), 0, 96);
+        for (var y = start; y >= 0; y--)
+        {
+            var type = GetBlock(new Vector3i(bx, y, bz));
+            if (type != BlockType.Air && type != BlockType.Water) return y + 1.75f;
+        }
+        return HeightAt(bx, bz) + 1.75f;
+    }
+
     public void SetBlock(Vector3i pos, BlockType type, bool persistent)
     {
         if (persistent) _overrides[pos] = type;
@@ -453,8 +585,9 @@ public sealed class WorldManager
         return false;
     }
 
-    public void ApplyHouseOwnership(Dictionary<string, bool> owned)
+    public void ApplyHouseOwnership(Dictionary<string, bool>? owned)
     {
+        if (owned is null) return;
         foreach (var home in CityHomes) home.OwnedByPlayer = owned.TryGetValue(home.Id, out var v) && v;
     }
 
@@ -486,6 +619,7 @@ public sealed class WorldManager
         for (var x = -1; x <= 10; x++) for (var z = -1; z <= 8; z++) SetCityBlock(origin + new Vector3i(x, 5, z), BlockType.Brick);
         SetCityBlock(origin + new Vector3i(2, 1, 3), BlockType.Wood);
         SetCityBlock(origin + new Vector3i(7, 1, 4), BlockType.Glass);
+        Doors.Add(new Door { Id = $"door-{id}", Position = new Vector3(origin.X + 4.5f, 1.05f, origin.Z - 0.38f), Yaw = 0f });
         CityHomes.Add(new HouseLot(id, new Vector3(origin.X + 4, 1, origin.Z - 2), price, owned));
     }
 
@@ -500,6 +634,7 @@ public sealed class WorldManager
             if (edge) SetCityBlock(origin + new Vector3i(x, y, z), y % 3 == 0 ? BlockType.Glass : material);
         }
         for (var x = -1; x <= size.X; x++) for (var z = -1; z <= size.Z; z++) SetCityBlock(origin + new Vector3i(x, size.Y + 1, z), BlockType.Concrete);
+        Doors.Add(new Door { Id = $"door-{id}", Position = new Vector3(origin.X + size.X / 2f, 1.05f, origin.Z - 0.38f), Yaw = 0f });
         Signs.Add(new DetailCube(new Vector3(origin.X + size.X / 2f, size.Y + 2.5f, origin.Z - 0.5f), new Vector3(5, 1, 0.25f), signColor));
     }
 
@@ -724,6 +859,7 @@ public sealed class SaveManager
         {
             world.LoadModifiedBlocks(worldSave.ModifiedBlocks);
             world.ApplyHouseOwnership(worldSave.HouseOwnership);
+            world.ApplyDoorStates(worldSave.DoorStates);
         }
         player = Read<PlayerState>("player.json") ?? player;
         economy.FromSave(Read<EconomySave>("economy.json"));
@@ -739,7 +875,7 @@ public sealed class SaveManager
     public void SaveAll(WorldManager world, EconomyManager economy, NpcManager npcs, List<Vehicle> vehicles, PlayerState player)
     {
         Directory.CreateDirectory(_dir);
-        Write("world.json", new WorldSave(world.SaveModifiedBlocks(), world.SaveHouseOwnership()));
+        Write("world.json", new WorldSave(world.SaveModifiedBlocks(), world.SaveHouseOwnership(), world.SaveDoorStates()));
         Write("player.json", player);
         Write("economy.json", economy.ToSave());
         Write("npcs.json", npcs.Npcs);
@@ -753,7 +889,23 @@ public sealed class SaveManager
     private void Write<T>(string file, T data) => File.WriteAllText(Path.Combine(_dir, file), JsonSerializer.Serialize(data, _json));
 }
 
-public sealed record WorldSave(Dictionary<string, string> ModifiedBlocks, Dictionary<string, bool> HouseOwnership);
+public sealed class WorldSave
+{
+    public Dictionary<string, string> ModifiedBlocks { get; set; } = [];
+    public Dictionary<string, bool> HouseOwnership { get; set; } = [];
+    public Dictionary<string, DoorSave> DoorStates { get; set; } = [];
+
+    public WorldSave()
+    {
+    }
+
+    public WorldSave(Dictionary<string, string> modifiedBlocks, Dictionary<string, bool> houseOwnership, Dictionary<string, DoorSave> doorStates)
+    {
+        ModifiedBlocks = modifiedBlocks;
+        HouseOwnership = houseOwnership;
+        DoorStates = doorStates;
+    }
+}
 public sealed record EconomySave(int PlayerMoney, int CityTaxes, Dictionary<string, int> DynamicPrices);
 
 public sealed class Vector3JsonConverter : JsonConverter<Vector3>

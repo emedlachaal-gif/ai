@@ -4,14 +4,15 @@ BlockHaven 3D est un jeu PC **solo offline** en C#/.NET 8 avec rendu OpenGL via 
 
 ## Ce qui est inclus
 
-- Vue **vraiment 3D à la première personne** avec souris, ZQSD/WASD, sprint, saut/vol créatif.
+- Vue **vraiment 3D à la première personne** avec souris, ZQSD/WASD, sprint, gravité, chute et vol uniquement en mode créatif.
 - Monde voxel procédural avec forêt/nature, montagne, rivière, ville préfaite et blocs modifiables.
-- Ville type Brookhaven au spawn : routes, lampadaires, maison starter, villas achetables, hôpital, police station, magasin.
-- Zone aviation complète : terminal, entrepôt, hangar, piste, avion pilotable et décollage.
+- Ville type Brookhaven au spawn : routes, lampadaires, maison starter, villas achetables, hôpital, police station, magasin et portes animées ouvrables.
+- Zone aviation complète : terminal, entrepôt, hangar, piste, avion pilotable et décollage avec vue joueur.
 - Gameplay Minecraft-like : casser/poser des blocs, matériaux terre/pierre/bois/verre, inventaire et mode créatif/survie simple.
 - Véhicules : voiture, moto, avion, entrée/sortie véhicule et trafic PNJ simple.
 - PNJ : population locale, rôles (policier, médecin, commerçant, pilote, livreur), routine maison → travail → magasin → maison, humeur et argent simulé.
 - Économie : argent local, salaire métier, maisons achetables, taxes et prix dynamiques simples.
+- Graphismes améliorés : ciel jour/nuit dynamique, soleil/lune, brouillard de distance, shader avec grain de matière, reflets spéculaires, eau animée et éclairage plus réaliste.
 - Sauvegarde locale exacte des modifications et états dans le dossier de l'exécutable :
   - `Saves/world.json`
   - `Saves/player.json`
@@ -26,12 +27,14 @@ BlockHaven 3D est un jeu PC **solo offline** en C#/.NET 8 avec rendu OpenGL via 
 | Avancer / reculer | `W`/`Z`, `S` |
 | Gauche / droite | `A`/`Q`, `D` |
 | Sprint | `Shift` |
+| Sauter / gravité | `Space` en survie |
 | Monter / descendre en créatif | `Space`, `Ctrl` |
 | Regarder | Souris |
 | Casser un bloc | Clic gauche |
 | Poser un bloc | Clic droit |
 | Choisir bloc | `1` terre, `2` pierre, `3` bois, `4` verre |
-| Entrer/sortir véhicule | `E` |
+| Ouvrir/fermer porte proche | `E` près d’une porte |
+| Entrer/sortir véhicule | `E` près d’un véhicule |
 | Acheter maison proche | `H` |
 | Recevoir salaire métier démo | `J` |
 | Avion : demander décollage | `R` dans l'avion, puis accélérer sur la piste |
@@ -60,7 +63,7 @@ L'exécutable sera dans `Builds/Windows/BlockHaven3D.exe`.
 ## Architecture
 
 - `BlockHavenGame` : boucle principale, entrée clavier/souris, rendu FPS 3D.
-- `WorldManager` : monde voxel, ville, airport, maisons, raycast blocs et persistance des modifications.
+- `WorldManager` : monde voxel, ville, airport, maisons, portes animées, raycast blocs et persistance des modifications.
 - `SaveManager` : sauvegardes JSON offline dans `Saves/`.
 - `NpcManager` : routines PNJ et simulation ville.
 - `EconomyManager` : argent, achats, salaires et taxes.
