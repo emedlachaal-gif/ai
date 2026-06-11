@@ -12,7 +12,7 @@ BlockHaven 3D est un jeu PC **solo offline** en C#/.NET 8 avec rendu OpenGL via 
 - Véhicules : voiture, moto, avion, entrée/sortie véhicule et trafic PNJ simple.
 - PNJ : population locale, rôles (policier, médecin, commerçant, pilote, livreur), routine maison → travail → magasin → maison, humeur et argent simulé.
 - Économie : argent local, salaire métier, maisons achetables, taxes et prix dynamiques simples.
-- Graphismes améliorés : ciel jour/nuit dynamique, soleil/lune, brouillard de distance, shader avec grain de matière, reflets spéculaires, eau animée et éclairage plus réaliste.
+- Graphismes style **Brookhaven / Roblox** : palette pastel saturée, shader plastique/toon, contours noirs doux, personnages PNJ détaillés façon Roblox, routes avec marquages, trottoirs, passages piétons, panneaux colorés, fontaine, ciel jour/nuit, soleil/lune, eau animée et brouillard de distance.
 - Sauvegarde locale exacte des modifications et états dans le dossier de l'exécutable :
   - `Saves/world.json`
   - `Saves/player.json`
@@ -62,8 +62,8 @@ L'exécutable sera dans `Builds/Windows/BlockHaven3D.exe`.
 
 ## Architecture
 
-- `BlockHavenGame` : boucle principale, entrée clavier/souris, rendu FPS 3D.
-- `WorldManager` : monde voxel, ville, airport, maisons, portes animées, raycast blocs et persistance des modifications.
+- `BlockHavenGame` : boucle principale, entrée clavier/souris, rendu FPS 3D, shader toon/plastique et modèles PNJ/véhicules avec contours.
+- `WorldManager` : monde voxel, ville Brookhaven-like, détails de rue Roblox, airport, maisons, portes animées, raycast blocs et persistance des modifications.
 - `SaveManager` : sauvegardes JSON offline dans `Saves/`.
 - `NpcManager` : routines PNJ et simulation ville.
 - `EconomyManager` : argent, achats, salaires et taxes.

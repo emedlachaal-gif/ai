@@ -288,14 +288,14 @@ public sealed class BlockHavenGame : GameWindow
 
     private void RenderCityDetails()
     {
-        foreach (var sign in _world.Signs) _cube.Draw(sign.Position, sign.Scale, sign.Color);
+        foreach (var sign in _world.Signs) DrawOutlined(sign.Position, sign.Scale, sign.Color, 0f, 0.035f);
         foreach (var door in _world.Doors)
         {
             var swing = 86f * door.OpenAmount;
             var yaw = door.Yaw + swing;
             var offset = new Vector3(MathF.Sin(MathHelper.DegreesToRadians(yaw)) * 0.42f, 0, MathF.Cos(MathHelper.DegreesToRadians(yaw)) * 0.42f);
-            _cube.DrawRotated(door.Position + offset, new Vector3(0.12f, 2.15f, 0.86f), door.IsOpen ? new Vector4(0.75f, 0.48f, 0.22f, 1) : new Vector4(0.45f, 0.22f, 0.08f, 1), yaw);
-            _cube.DrawRotated(door.Position + offset + new Vector3(0, 0.12f, 0), new Vector3(0.16f, 0.12f, 0.16f), new Vector4(0.95f, 0.72f, 0.25f, 1), yaw);
+            DrawOutlined(door.Position + offset, new Vector3(0.12f, 2.15f, 0.86f), door.IsOpen ? new Vector4(0.88f, 0.62f, 0.32f, 1) : new Vector4(0.58f, 0.31f, 0.12f, 1), yaw, 0.045f);
+            _cube.DrawRotated(door.Position + offset + new Vector3(0, 0.12f, 0), new Vector3(0.16f, 0.12f, 0.16f), new Vector4(1f, 0.82f, 0.22f, 1), yaw);
         }
     }
 
@@ -311,22 +311,41 @@ public sealed class BlockHavenGame : GameWindow
     private void RenderVehicle(Vehicle v)
     {
         var body = v.Kind == VehicleKind.Airplane ? new Vector3(3.8f, 0.55f, 1.1f) : v.Kind == VehicleKind.Motorcycle ? new Vector3(1.8f, 0.55f, 0.55f) : new Vector3(2.2f, 0.8f, 1.25f);
-        _cube.DrawRotated(v.Position, body, v.Color, v.Yaw);
+        DrawOutlined(v.Position, body, v.Color, v.Yaw, 0.055f);
         if (v.Kind == VehicleKind.Airplane)
         {
-            _cube.DrawRotated(v.Position + new Vector3(0, 0.15f, 0), new Vector3(1.0f, 0.12f, 7.5f), new Vector4(0.9f, 0.9f, 0.95f, 1), v.Yaw);
-            _cube.DrawRotated(v.Position + new Vector3(-2.5f, 0.1f, 0), new Vector3(0.2f, 1.2f, 2.2f), new Vector4(0.8f, 0.85f, 1f, 1), v.Yaw);
+            DrawOutlined(v.Position + new Vector3(0, 0.15f, 0), new Vector3(1.0f, 0.12f, 7.5f), new Vector4(0.96f, 0.97f, 1f, 1), v.Yaw, 0.04f);
+            DrawOutlined(v.Position + new Vector3(-2.5f, 0.1f, 0), new Vector3(0.2f, 1.2f, 2.2f), new Vector4(0.82f, 0.9f, 1f, 1), v.Yaw, 0.035f);
         }
         else
         {
-            _cube.DrawRotated(v.Position + new Vector3(0.55f, 0.55f, 0), new Vector3(0.7f, 0.45f, 1.05f), new Vector4(0.65f, 0.9f, 1f, 0.8f), v.Yaw);
+            DrawOutlined(v.Position + new Vector3(0.55f, 0.55f, 0), new Vector3(0.7f, 0.45f, 1.05f), new Vector4(0.65f, 0.9f, 1f, 0.86f), v.Yaw, 0.035f);
         }
     }
 
     private void RenderNpc(Npc npc)
     {
-        _cube.Draw(npc.Position + new Vector3(0, 0.85f, 0), new Vector3(0.45f, 0.95f, 0.28f), npc.RoleColor);
-        _cube.Draw(npc.Position + new Vector3(0, 1.55f, 0), new Vector3(0.34f, 0.34f, 0.34f), new Vector4(0.96f, 0.74f, 0.55f, 1));
+        var bob = MathF.Sin((float)GLFW.GetTime() * 5f + npc.Id.GetHashCode()) * 0.035f;
+        var p = npc.Position + new Vector3(0, bob, 0);
+        var shirt = npc.RoleColor;
+        var skin = new Vector4(1.0f, 0.78f, 0.57f, 1);
+        DrawOutlined(p + new Vector3(0, 1.03f, 0), new Vector3(0.55f, 0.78f, 0.32f), shirt, 0f, 0.045f);
+        DrawOutlined(p + new Vector3(-0.43f, 1.02f, 0), new Vector3(0.18f, 0.72f, 0.24f), new Vector4(shirt.X * 0.9f, shirt.Y * 0.9f, shirt.Z * 0.9f, 1), 0f, 0.035f);
+        DrawOutlined(p + new Vector3(0.43f, 1.02f, 0), new Vector3(0.18f, 0.72f, 0.24f), new Vector4(shirt.X * 0.9f, shirt.Y * 0.9f, shirt.Z * 0.9f, 1), 0f, 0.035f);
+        DrawOutlined(p + new Vector3(-0.16f, 0.36f, 0), new Vector3(0.2f, 0.65f, 0.24f), new Vector4(0.12f, 0.25f, 0.72f, 1), 0f, 0.035f);
+        DrawOutlined(p + new Vector3(0.16f, 0.36f, 0), new Vector3(0.2f, 0.65f, 0.24f), new Vector4(0.12f, 0.25f, 0.72f, 1), 0f, 0.035f);
+        DrawOutlined(p + new Vector3(0, 1.63f, 0), new Vector3(0.42f, 0.42f, 0.42f), skin, 0f, 0.045f);
+        _cube.Draw(p + new Vector3(-0.09f, 1.67f, -0.215f), new Vector3(0.055f, 0.055f, 0.025f), new Vector4(0.05f, 0.05f, 0.06f, 1));
+        _cube.Draw(p + new Vector3(0.09f, 1.67f, -0.215f), new Vector3(0.055f, 0.055f, 0.025f), new Vector4(0.05f, 0.05f, 0.06f, 1));
+        _cube.Draw(p + new Vector3(0, 1.52f, -0.225f), new Vector3(0.18f, 0.035f, 0.025f), new Vector4(0.65f, 0.12f, 0.18f, 1));
+        DrawOutlined(p + new Vector3(0, 1.91f, 0), new Vector3(0.46f, 0.18f, 0.46f), new Vector4(0.18f, 0.09f, 0.04f, 1), 0f, 0.03f);
+    }
+
+    private void DrawOutlined(Vector3 position, Vector3 scale, Vector4 color, float yaw, float outline)
+    {
+        var outlineScale = scale + new Vector3(outline * 2f, outline * 2f, outline * 2f);
+        _cube.DrawRotated(position, outlineScale, new Vector4(0.02f, 0.025f, 0.035f, Math.Min(1f, color.W)), yaw);
+        _cube.DrawRotated(position, scale, color, yaw);
     }
 
     private const string VertexShaderSource = """
@@ -368,16 +387,21 @@ void main()
     vec3 viewDir = normalize(viewPos - WorldPos);
     vec3 halfDir = normalize(-lightDir + viewDir);
     float diffuse = max(dot(n, -lightDir), 0.0);
-    float specular = pow(max(dot(n, halfDir), 0.0), 48.0) * 0.18 * objectColor.a;
-    float ambient = 0.18 + dayLight * 0.28;
-    float grain = hash(floor(WorldPos * 2.5)) * 0.075 - 0.035;
-    float edge = smoothstep(0.46, 0.5, max(max(abs(fract(WorldPos.x) - 0.5), abs(fract(WorldPos.y) - 0.5)), abs(fract(WorldPos.z) - 0.5)));
-    vec3 textured = objectColor.rgb + vec3(grain) - vec3(edge * 0.055);
-    vec3 warmSun = mix(vec3(0.7, 0.78, 1.0), vec3(1.0, 0.92, 0.76), dayLight);
-    vec3 lit = textured * (ambient + diffuse * (0.42 + dayLight * 0.5)) * warmSun + vec3(specular);
-    float fog = clamp(length(viewPos.xz - WorldPos.xz) / 280.0, 0.0, 0.62);
-    vec3 sky = mix(vec3(0.015, 0.02, 0.055), vec3(0.56, 0.75, 0.96), dayLight);
-    FragColor = vec4(mix(pow(max(lit, vec3(0.0)), vec3(1.0 / 2.2)), sky, fog), objectColor.a);
+    float toonDiffuse = floor(diffuse * 4.0 + 0.5) / 4.0;
+    float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.4) * 0.18;
+    float specular = pow(max(dot(n, halfDir), 0.0), 38.0) * 0.34 * objectColor.a;
+    float ambient = 0.28 + dayLight * 0.25;
+    float grain = hash(floor(WorldPos * 3.0)) * 0.035 - 0.015;
+    float edge = smoothstep(0.455, 0.5, max(max(abs(fract(WorldPos.x) - 0.5), abs(fract(WorldPos.y) - 0.5)), abs(fract(WorldPos.z) - 0.5)));
+    vec3 baseColor = mix(objectColor.rgb, pow(objectColor.rgb, vec3(0.72)), 0.38);
+    vec3 textured = baseColor + vec3(grain) - vec3(edge * 0.075);
+    vec3 warmSun = mix(vec3(0.76, 0.84, 1.0), vec3(1.0, 0.94, 0.82), dayLight);
+    vec3 lit = textured * (ambient + toonDiffuse * (0.34 + dayLight * 0.55)) * warmSun + vec3(specular + rim);
+    float fog = clamp(length(viewPos.xz - WorldPos.xz) / 300.0, 0.0, 0.46);
+    vec3 sky = mix(vec3(0.02, 0.025, 0.065), vec3(0.47, 0.72, 1.0), dayLight);
+    vec3 graded = pow(max(lit, vec3(0.0)), vec3(1.0 / 2.2));
+    graded = mix(vec3(dot(graded, vec3(0.299, 0.587, 0.114))), graded, 1.22);
+    FragColor = vec4(mix(graded, sky, fog), objectColor.a);
 }
 """;
 }
@@ -501,6 +525,7 @@ public sealed class WorldManager
         BuildPublicBuilding("store", new Vector3i(21, 1, -26), new Vector3i(16, 5, 12), BlockType.Glass, new Vector4(0.2f, 0.8f, 0.95f, 1));
         BuildAirport();
         BuildStreetLights();
+        BuildBrookhavenPolish();
         RoadPoints = Enumerable.Range(-40, 81).Where(i => i % 4 == 0).SelectMany(i => new[] { new Vector3(i, 1.1f, 0), new Vector3(0, 1.1f, i) }).ToList();
         Workplaces.AddRange([
             new WorkPlace("hospital", "Medecin", new Vector3(20, 2, 20)),
@@ -658,6 +683,42 @@ public sealed class WorldManager
         }
     }
 
+
+    private void BuildBrookhavenPolish()
+    {
+        var sidewalk = new Vector4(0.86f, 0.88f, 0.92f, 1);
+        Signs.Add(new DetailCube(new Vector3(0, 0.08f, 8.5f), new Vector3(90f, 0.14f, 2.2f), sidewalk));
+        Signs.Add(new DetailCube(new Vector3(0, 0.08f, -8.5f), new Vector3(90f, 0.14f, 2.2f), sidewalk));
+        Signs.Add(new DetailCube(new Vector3(8.5f, 0.08f, 0), new Vector3(2.2f, 0.14f, 90f), sidewalk));
+        Signs.Add(new DetailCube(new Vector3(-8.5f, 0.08f, 0), new Vector3(2.2f, 0.14f, 90f), sidewalk));
+
+        for (var i = -38; i <= 38; i += 8)
+        {
+            Signs.Add(new DetailCube(new Vector3(i, 0.16f, 0), new Vector3(3.2f, 0.08f, 0.18f), new Vector4(1f, 0.93f, 0.45f, 1)));
+            Signs.Add(new DetailCube(new Vector3(0, 0.16f, i), new Vector3(0.18f, 0.08f, 3.2f), new Vector4(1f, 0.93f, 0.45f, 1)));
+        }
+
+        for (var i = -5; i <= 5; i += 2)
+        {
+            Signs.Add(new DetailCube(new Vector3(i, 0.18f, 6.2f), new Vector3(0.8f, 0.08f, 2.1f), new Vector4(1f, 1f, 1f, 1)));
+            Signs.Add(new DetailCube(new Vector3(6.2f, 0.18f, i), new Vector3(2.1f, 0.08f, 0.8f), new Vector4(1f, 1f, 1f, 1)));
+        }
+
+        Signs.Add(new DetailCube(new Vector3(-1, 6.8f, -10.2f), new Vector3(13f, 2.2f, 0.28f), new Vector4(0.04f, 0.18f, 0.42f, 1)));
+        Signs.Add(new DetailCube(new Vector3(-1, 7.0f, -10.42f), new Vector3(11.8f, 1.25f, 0.18f), new Vector4(0.0f, 0.68f, 1f, 1)));
+        Signs.Add(new DetailCube(new Vector3(13, 1.15f, 12), new Vector3(4.0f, 0.55f, 1.4f), new Vector4(0.94f, 0.22f, 0.34f, 1)));
+        Signs.Add(new DetailCube(new Vector3(13, 1.85f, 12), new Vector3(0.35f, 1.5f, 1.2f), new Vector4(0.96f, 0.78f, 0.25f, 1)));
+        Signs.Add(new DetailCube(new Vector3(-14, 1.05f, 12), new Vector3(3.5f, 0.42f, 1.0f), new Vector4(0.16f, 0.46f, 0.95f, 1)));
+
+        for (var i = 0; i < 8; i++)
+        {
+            var angle = i / 8f * MathHelper.TwoPi;
+            var pos = new Vector3(MathF.Cos(angle) * 4f + 2f, 0.55f, MathF.Sin(angle) * 4f + 14f);
+            Signs.Add(new DetailCube(pos, new Vector3(0.55f, 0.65f, 0.55f), new Vector4(0.14f, 0.72f, 0.32f, 1)));
+        }
+        Signs.Add(new DetailCube(new Vector3(2f, 1.1f, 14f), new Vector3(1.8f, 1.1f, 1.8f), new Vector4(0.3f, 0.72f, 1f, 0.75f)));
+    }
+
     private bool RiverAt(int x, int z) => Math.Abs(z - MathF.Sin(x * 0.07f) * 10f - 92f) < 4f;
     private void SetCityBlock(Vector3i pos, BlockType type)
     {
@@ -670,18 +731,18 @@ public static class BlockPalette
 {
     public static Vector4 GetColor(BlockType type) => type switch
     {
-        BlockType.Grass => new Vector4(0.25f, 0.72f, 0.22f, 1),
-        BlockType.Dirt => new Vector4(0.45f, 0.27f, 0.12f, 1),
-        BlockType.Stone => new Vector4(0.48f, 0.48f, 0.5f, 1),
-        BlockType.Wood => new Vector4(0.55f, 0.32f, 0.12f, 1),
-        BlockType.Leaves => new Vector4(0.12f, 0.55f, 0.13f, 1),
-        BlockType.Road => new Vector4(0.04f, 0.045f, 0.05f, 1),
-        BlockType.Water => new Vector4(0.1f, 0.45f, 0.9f, 0.8f),
-        BlockType.Glass => new Vector4(0.45f, 0.85f, 1f, 0.72f),
-        BlockType.Brick => new Vector4(0.65f, 0.16f, 0.1f, 1),
-        BlockType.Concrete => new Vector4(0.74f, 0.74f, 0.72f, 1),
+        BlockType.Grass => new Vector4(0.38f, 0.82f, 0.32f, 1),
+        BlockType.Dirt => new Vector4(0.58f, 0.38f, 0.22f, 1),
+        BlockType.Stone => new Vector4(0.63f, 0.65f, 0.7f, 1),
+        BlockType.Wood => new Vector4(0.72f, 0.46f, 0.22f, 1),
+        BlockType.Leaves => new Vector4(0.18f, 0.72f, 0.24f, 1),
+        BlockType.Road => new Vector4(0.12f, 0.13f, 0.16f, 1),
+        BlockType.Water => new Vector4(0.14f, 0.62f, 1f, 0.78f),
+        BlockType.Glass => new Vector4(0.56f, 0.9f, 1f, 0.64f),
+        BlockType.Brick => new Vector4(0.86f, 0.28f, 0.22f, 1),
+        BlockType.Concrete => new Vector4(0.86f, 0.86f, 0.84f, 1),
         BlockType.Light => new Vector4(1f, 0.85f, 0.35f, 1),
-        BlockType.Runway => new Vector4(0.09f, 0.09f, 0.1f, 1),
+        BlockType.Runway => new Vector4(0.13f, 0.13f, 0.15f, 1),
         _ => Vector4.Zero
     };
 }
