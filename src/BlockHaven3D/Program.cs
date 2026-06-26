@@ -42,6 +42,8 @@ public sealed class BlockHavenGame : GameWindow
     private bool _paused;
     private float _verticalVelocity;
     private bool _grounded;
+    private float _walkCycle;
+    private string _interactionHint = string.Empty;
     private double _autosaveTimer;
     private double _worldClock = 8.0;
     private float _sun;
@@ -107,6 +109,7 @@ public sealed class BlockHavenGame : GameWindow
         UpdateMouseLook();
         if (KeyboardState.IsKeyPressed(Keys.F5)) _save.SaveAll(_world, _economy, _npcs, _vehicles, CapturePlayer());
         if (KeyboardState.IsKeyPressed(Keys.F1)) _creative = !_creative;
+        _interactionHint = _drivenVehicle is not null ? "[E] Sortir du vehicule" : _world.GetDoorPrompt(_camera.Position) ?? GetVehiclePrompt();
         if (KeyboardState.IsKeyPressed(Keys.E))
         {
             if (_drivenVehicle is not null) ToggleNearestVehicle();
@@ -135,35 +138,47 @@ public sealed class BlockHavenGame : GameWindow
             _autosaveTimer = 0;
             _save.SaveAll(_world, _economy, _npcs, _vehicles, CapturePlayer());
         }
-        Title = $"BlockHaven 3D | Argent ${_economy.PlayerMoney} | Mode {(_creative ? "Creatif" : "Survie")} | Bloc {_player.SelectedBlock} | Heure {_worldClock:00.0}h | E: porte/vehicule H: maison F5: save";
+        var hint = string.IsNullOrWhiteSpace(_interactionHint) ? "" : $" | {_interactionHint}";
+        Title = $"BlockHaven 3D | Argent ${_economy.PlayerMoney} | Mode {(_creative ? "Creatif" : "Survie")} | Bloc {_player.SelectedBlock} | Heure {_worldClock:00.0}h | E: porte/vehicule H: maison F5: save{hint}";
     }
 
     protected override void OnRenderFrame(FrameEventArgs args)
     {
         base.OnRenderFrame(args);
-        var sky = new Vector3(0.015f, 0.02f, 0.055f) + (new Vector3(0.56f, 0.75f, 0.96f) - new Vector3(0.015f, 0.02f, 0.055f)) * _sun;
-        GL.ClearColor(sky.X, sky.Y, sky.Z, 1f);
+        var (skyBottom, skyTop) = SkyGradient(_worldClock, _sun);
+        GL.ClearColor(skyTop.X, skyTop.Y, skyTop.Z, 1f);
         GL.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         _shader.Use();
         var projection = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(74f), Size.X / (float)Size.Y, 0.05f, 600f);
         _shader.SetMatrix4("projection", projection);
-        _shader.SetMatrix4("view", _camera.GetViewMatrix());
+        _shader.SetMatrix4("view", _camera.GetViewMatrix(CurrentHeadBob()));
         _shader.SetVector3("lightDir", Vector3.Normalize(new Vector3(-0.35f, -1f, -0.25f)));
         _shader.SetVector3("viewPos", _camera.Position);
         _shader.SetFloat("dayLight", _sun);
         _shader.SetFloat("time", (float)GLFW.GetTime());
+        _shader.SetVector3("skyBottom", skyBottom);
+        _shader.SetVector3("skyTop", skyTop);
+        _shader.SetFloat("fogDensity", 0.0065f);
 
         foreach (var block in _world.VisibleBlocksAround(_camera.Position, 95))
         {
             var color = BlockPalette.GetColor(block.Type);
             if (block.Type == BlockType.Water) color = new Vector4(0.1f, 0.45f + MathF.Sin((float)GLFW.GetTime() * 2f) * 0.06f, 0.9f, 0.72f);
-            _cube.Draw(block.Position, Vector3.One, color);
+            _cube.DrawBlock(block.Position, Vector3.One, color, block.Type, _world.BlockAo(block.Position));
         }
         RenderSunAndMoon();
         RenderCityDetails();
         foreach (var vehicle in _vehicles) RenderVehicle(vehicle);
         foreach (var npc in _npcs.Npcs) RenderNpc(npc);
+        RenderInteractionPrompt();
         SwapBuffers();
+    }
+
+    private Vector3 CurrentHeadBob()
+    {
+        if (_drivenVehicle is not null || !_grounded) return Vector3.Zero;
+        var intensity = KeyboardState.IsKeyDown(Keys.LeftShift) ? 0.075f : 0.045f;
+        return new Vector3(MathF.Sin(_walkCycle * 0.5f) * intensity * 0.35f, MathF.Abs(MathF.Sin(_walkCycle)) * intensity, 0);
     }
 
     private void UpdateMouseLook()
@@ -188,14 +203,19 @@ public sealed class BlockHavenGame : GameWindow
         if (KeyboardState.IsKeyDown(Keys.S)) horizontal -= _camera.FrontFlat;
         if (KeyboardState.IsKeyDown(Keys.A) || KeyboardState.IsKeyDown(Keys.Q)) horizontal -= _camera.RightFlat;
         if (KeyboardState.IsKeyDown(Keys.D)) horizontal += _camera.RightFlat;
-        if (horizontal.LengthSquared > 0.001f) _camera.Position += Vector3.Normalize(horizontal) * speed * dt;
+        if (horizontal.LengthSquared > 0.001f)
+        {
+            var move = Vector3.Normalize(horizontal) * speed * dt;
+            TryMovePlayer(move);
+            _walkCycle += dt * (KeyboardState.IsKeyDown(Keys.LeftShift) ? 12f : 8f);
+        }
 
         if (_creative)
         {
             var fly = 0f;
             if (KeyboardState.IsKeyDown(Keys.Space)) fly += 1f;
             if (KeyboardState.IsKeyDown(Keys.LeftControl)) fly -= 1f;
-            if (MathF.Abs(fly) > 0.01f) _camera.Position += Vector3.UnitY * fly * speed * dt;
+            if (MathF.Abs(fly) > 0.01f) TryMovePlayer(Vector3.UnitY * fly * speed * dt);
         }
         else
         {
@@ -206,7 +226,7 @@ public sealed class BlockHavenGame : GameWindow
             }
             _verticalVelocity -= 24f * dt;
             _verticalVelocity = Math.Max(_verticalVelocity, -42f);
-            _camera.Position += Vector3.UnitY * _verticalVelocity * dt;
+            TryMovePlayer(Vector3.UnitY * _verticalVelocity * dt);
         }
 
         var ground = _world.EyeHeightAt(_camera.Position.X, _camera.Position.Z, _camera.Position.Y);
@@ -222,15 +242,37 @@ public sealed class BlockHavenGame : GameWindow
         }
     }
 
+    private void TryMovePlayer(Vector3 delta)
+    {
+        var next = _camera.Position + delta;
+        if (!_world.CollidesPlayer(next, _vehicles, _npcs.Npcs)) _camera.Position = next;
+    }
+
+    private string? GetVehiclePrompt()
+    {
+        var nearest = _vehicles.Where(v => Vector3.Distance(v.Position, _camera.Position) < 7f).OrderBy(v => Vector3.Distance(v.Position, _camera.Position)).FirstOrDefault();
+        return nearest is null ? null : $"[E] Entrer {nearest.Kind}";
+    }
+
+    private static (Vector3 Bottom, Vector3 Top) SkyGradient(double hour, float sun)
+    {
+        if (hour is >= 5.0 and < 7.5) return (new Vector3(1.0f, 0.55f, 0.28f), new Vector3(0.35f, 0.52f, 0.95f));
+        if (hour is >= 17.0 and < 20.0) return (new Vector3(1.0f, 0.36f, 0.42f), new Vector3(0.23f, 0.12f, 0.45f));
+        if (hour is >= 20.0 or < 5.0) return (new Vector3(0.02f, 0.025f, 0.065f), new Vector3(0.005f, 0.008f, 0.03f));
+        return (new Vector3(0.62f, 0.82f, 1.0f), new Vector3(0.16f, 0.45f + sun * 0.2f, 1.0f));
+    }
+
     private void UpdateVehicleDriving(float dt)
     {
         var vehicle = _drivenVehicle!;
         var throttle = (KeyboardState.IsKeyDown(Keys.W) || KeyboardState.IsKeyDown(Keys.Z)) ? 1f : KeyboardState.IsKeyDown(Keys.S) ? -0.6f : 0f;
         var steer = (KeyboardState.IsKeyDown(Keys.A) || KeyboardState.IsKeyDown(Keys.Q)) ? -1f : KeyboardState.IsKeyDown(Keys.D) ? 1f : 0f;
-        vehicle.UpdatePlayerDrive(dt, throttle, steer, KeyboardState.IsKeyDown(Keys.Space));
-        _camera.Position = vehicle.Position + vehicle.CameraOffset;
+        var pitchInput = KeyboardState.IsKeyDown(Keys.Up) || KeyboardState.IsKeyDown(Keys.Space) ? 1f : KeyboardState.IsKeyDown(Keys.Down) || KeyboardState.IsKeyDown(Keys.LeftShift) ? -1f : 0f;
+        var rollInput = KeyboardState.IsKeyDown(Keys.Left) ? -1f : KeyboardState.IsKeyDown(Keys.Right) ? 1f : 0f;
+        vehicle.UpdatePlayerDrive(dt, throttle, steer, KeyboardState.IsKeyDown(Keys.Space), pitchInput, rollInput);
+        _camera.Position = vehicle.CockpitCameraPosition;
         _camera.Yaw = vehicle.Yaw;
-        _camera.Pitch = Math.Clamp(_camera.Pitch, -30f, 35f);
+        _camera.Pitch = vehicle.Kind == VehicleKind.Airplane ? Math.Clamp(vehicle.Pitch - 3f, -35f, 35f) : Math.Clamp(_camera.Pitch, -30f, 35f);
         if (KeyboardState.IsKeyPressed(Keys.R) && vehicle.Kind == VehicleKind.Airplane) vehicle.RequestTakeoff = true;
     }
 
@@ -308,6 +350,16 @@ public sealed class BlockHavenGame : GameWindow
         _cube.Draw(moonPos, new Vector3(5f, 5f, 5f), new Vector4(0.68f, 0.74f, 0.9f, 1));
     }
 
+    private void RenderInteractionPrompt()
+    {
+        if (string.IsNullOrWhiteSpace(_interactionHint)) return;
+        var center = _camera.Position + _camera.Front * 3.2f + Vector3.UnitY * -0.55f;
+        DrawOutlined(center, new Vector3(1.9f, 0.22f, 0.08f), new Vector4(0.02f, 0.12f, 0.32f, 0.82f), _camera.Yaw, 0.025f);
+        _cube.DrawRotated(center + new Vector3(-0.72f, 0.02f, -0.035f), new Vector3(0.18f, 0.16f, 0.05f), new Vector4(0.2f, 0.75f, 1f, 1), _camera.Yaw);
+        _cube.DrawRotated(center + new Vector3(-0.42f, 0.02f, -0.035f), new Vector3(0.5f, 0.08f, 0.05f), new Vector4(1f, 1f, 1f, 1), _camera.Yaw);
+        _cube.DrawRotated(center + new Vector3(0.28f, 0.02f, -0.035f), new Vector3(0.62f, 0.08f, 0.05f), new Vector4(1f, 1f, 1f, 1), _camera.Yaw);
+    }
+
     private void RenderVehicle(Vehicle v)
     {
         var body = v.Kind == VehicleKind.Airplane ? new Vector3(3.8f, 0.55f, 1.1f) : v.Kind == VehicleKind.Motorcycle ? new Vector3(1.8f, 0.55f, 0.55f) : new Vector3(2.2f, 0.8f, 1.25f);
@@ -316,6 +368,8 @@ public sealed class BlockHavenGame : GameWindow
         {
             DrawOutlined(v.Position + new Vector3(0, 0.15f, 0), new Vector3(1.0f, 0.12f, 7.5f), new Vector4(0.96f, 0.97f, 1f, 1), v.Yaw, 0.04f);
             DrawOutlined(v.Position + new Vector3(-2.5f, 0.1f, 0), new Vector3(0.2f, 1.2f, 2.2f), new Vector4(0.82f, 0.9f, 1f, 1), v.Yaw, 0.035f);
+            DrawOutlined(v.Position + new Vector3(1.15f, 0.48f, 0), new Vector3(0.8f, 0.45f, 0.85f), new Vector4(0.38f, 0.78f, 1f, 0.72f), v.Yaw, 0.025f);
+            DrawOutlined(v.Position + new Vector3(2.2f, 0.0f, 0), new Vector3(1.0f, 0.35f, 0.42f), new Vector4(0.93f, 0.1f, 0.12f, 1), v.Yaw, 0.025f);
         }
         else
         {
@@ -357,10 +411,19 @@ uniform mat4 view;
 uniform mat4 projection;
 out vec3 Normal;
 out vec3 WorldPos;
+out vec3 LocalPos;
+uniform int materialKind;
+uniform float time;
 void main()
 {
-    vec4 world = model * vec4(aPosition, 1.0);
+    vec3 local = aPosition;
+    if (materialKind == 7)
+    {
+        local.y += sin((aPosition.x + time) * 3.0) * 0.045 + cos((aPosition.z + time * 0.7) * 2.4) * 0.035;
+    }
+    vec4 world = model * vec4(local, 1.0);
     WorldPos = world.xyz;
+    LocalPos = aPosition;
     Normal = mat3(transpose(inverse(model))) * aNormal;
     gl_Position = projection * view * world;
 }
@@ -370,12 +433,18 @@ void main()
 #version 330 core
 in vec3 Normal;
 in vec3 WorldPos;
+in vec3 LocalPos;
 out vec4 FragColor;
 uniform vec4 objectColor;
 uniform vec3 lightDir;
 uniform vec3 viewPos;
+uniform vec3 skyBottom;
+uniform vec3 skyTop;
 uniform float dayLight;
 uniform float time;
+uniform float voxelAo;
+uniform float fogDensity;
+uniform int materialKind;
 float hash(vec3 p)
 {
     return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
@@ -389,16 +458,22 @@ void main()
     float diffuse = max(dot(n, -lightDir), 0.0);
     float toonDiffuse = floor(diffuse * 4.0 + 0.5) / 4.0;
     float rim = pow(1.0 - max(dot(n, viewDir), 0.0), 2.4) * 0.18;
-    float specular = pow(max(dot(n, halfDir), 0.0), 38.0) * 0.34 * objectColor.a;
-    float ambient = 0.28 + dayLight * 0.25;
-    float grain = hash(floor(WorldPos * 3.0)) * 0.035 - 0.015;
+    float materialSpec = materialKind == 6 ? 0.72 : materialKind == 7 ? 0.9 : materialKind == 8 ? 0.18 : materialKind == 4 ? 0.28 : 0.34;
+    float roughness = materialKind == 6 ? 0.015 : materialKind == 8 || materialKind == 10 ? 0.08 : materialKind == 4 ? 0.055 : 0.035;
+    float specular = pow(max(dot(n, halfDir), 0.0), mix(18.0, 72.0, materialSpec)) * materialSpec * objectColor.a;
+    if (materialKind == 7) specular += pow(max(dot(reflect(lightDir, n), viewDir), 0.0), 96.0) * (0.35 + sin(time * 2.0 + WorldPos.x) * 0.08);
+    float ambient = (0.28 + dayLight * 0.25) * voxelAo;
+    float grain = hash(floor(WorldPos * (materialKind == 4 ? 8.0 : 3.0))) * roughness - roughness * 0.5;
+    float woodVein = materialKind == 4 ? sin(WorldPos.x * 7.0 + hash(floor(WorldPos.zzx)) * 2.0) * 0.045 : 0.0;
+    float asphalt = materialKind == 6 || materialKind == 11 ? hash(floor(WorldPos * 12.0)) * 0.12 - 0.06 : 0.0;
     float edge = smoothstep(0.455, 0.5, max(max(abs(fract(WorldPos.x) - 0.5), abs(fract(WorldPos.y) - 0.5)), abs(fract(WorldPos.z) - 0.5)));
     vec3 baseColor = mix(objectColor.rgb, pow(objectColor.rgb, vec3(0.72)), 0.38);
-    vec3 textured = baseColor + vec3(grain) - vec3(edge * 0.075);
+    vec3 textured = baseColor + vec3(grain + woodVein + asphalt) - vec3(edge * 0.075);
     vec3 warmSun = mix(vec3(0.76, 0.84, 1.0), vec3(1.0, 0.94, 0.82), dayLight);
     vec3 lit = textured * (ambient + toonDiffuse * (0.34 + dayLight * 0.55)) * warmSun + vec3(specular + rim);
-    float fog = clamp(length(viewPos.xz - WorldPos.xz) / 300.0, 0.0, 0.46);
-    vec3 sky = mix(vec3(0.02, 0.025, 0.065), vec3(0.47, 0.72, 1.0), dayLight);
+    float dist = length(viewPos - WorldPos);
+    float fog = clamp(1.0 - exp(-fogDensity * dist), 0.0, 0.82);
+    vec3 sky = mix(skyBottom, skyTop, clamp((normalize(WorldPos - viewPos).y + 0.2) * 0.7, 0.0, 1.0));
     vec3 graded = pow(max(lit, vec3(0.0)), vec3(1.0 / 2.2));
     graded = mix(vec3(dot(graded, vec3(0.299, 0.587, 0.114))), graded, 1.22);
     FragColor = vec4(mix(graded, sky, fog), objectColor.a);
@@ -423,7 +498,7 @@ public sealed class Camera
     }
     public Vector3 FrontFlat => Vector3.Normalize(new Vector3(Front.X, 0, Front.Z));
     public Vector3 RightFlat => Vector3.Normalize(Vector3.Cross(FrontFlat, Vector3.UnitY));
-    public Matrix4 GetViewMatrix() => Matrix4.LookAt(Position, Position + Front, Vector3.UnitY);
+    public Matrix4 GetViewMatrix(Vector3 bobOffset = default) => Matrix4.LookAt(Position + bobOffset, Position + bobOffset + Front, Vector3.UnitY);
 }
 
 public enum BlockType { Air, Grass, Dirt, Stone, Wood, Leaves, Road, Water, Glass, Brick, Concrete, Light, Runway }
@@ -501,6 +576,12 @@ public sealed class WorldManager
         }
     }
 
+    public string? GetDoorPrompt(Vector3 playerPosition)
+    {
+        var door = Doors.Where(d => Vector3.Distance(d.Position, playerPosition) < 3.2f).OrderBy(d => Vector3.Distance(d.Position, playerPosition)).FirstOrDefault();
+        return door is null ? null : $"[E] {(door.IsOpen ? "Fermer" : "Ouvrir")}";
+    }
+
     public bool ToggleNearestDoor(Vector3 playerPosition)
     {
         var door = Doors.Where(d => Vector3.Distance(d.Position, playerPosition) < 3.2f).OrderBy(d => Vector3.Distance(d.Position, playerPosition)).FirstOrDefault();
@@ -575,6 +656,43 @@ public sealed class WorldManager
             if (type != BlockType.Air && type != BlockType.Water) return y + 1.75f;
         }
         return HeightAt(bx, bz) + 1.75f;
+    }
+
+
+    public float BlockAo(Vector3i pos)
+    {
+        var shade = 1.0f;
+        if (GetBlock(pos + new Vector3i(1, 0, 0)) != BlockType.Air) shade -= 0.035f;
+        if (GetBlock(pos - new Vector3i(1, 0, 0)) != BlockType.Air) shade -= 0.035f;
+        if (GetBlock(pos + new Vector3i(0, 0, 1)) != BlockType.Air) shade -= 0.035f;
+        if (GetBlock(pos - new Vector3i(0, 0, 1)) != BlockType.Air) shade -= 0.035f;
+        if (GetBlock(pos + new Vector3i(0, 1, 0)) != BlockType.Air) shade -= 0.08f;
+        return Math.Clamp(shade, 0.72f, 1f);
+    }
+
+    public bool CollidesPlayer(Vector3 eyePosition, IEnumerable<Vehicle> vehicles, IEnumerable<Npc> npcs)
+    {
+        var lower = eyePosition - new Vector3(0, 0.65f, 0);
+        var upper = eyePosition - new Vector3(0, 0.12f, 0);
+        var probes = new[]
+        {
+            lower + new Vector3(0.32f, 0, 0.32f), lower + new Vector3(-0.32f, 0, 0.32f),
+            lower + new Vector3(0.32f, 0, -0.32f), lower + new Vector3(-0.32f, 0, -0.32f),
+            upper + new Vector3(0.32f, 0, 0.32f), upper + new Vector3(-0.32f, 0, -0.32f)
+        };
+        foreach (var probe in probes)
+        {
+            var block = GetBlock(new Vector3i((int)MathF.Floor(probe.X), (int)MathF.Floor(probe.Y), (int)MathF.Floor(probe.Z)));
+            if (block != BlockType.Air && block != BlockType.Water) return true;
+        }
+
+        foreach (var door in Doors.Where(d => !d.IsOpen && d.OpenAmount < 0.35f))
+            if (MathF.Abs(eyePosition.X - door.Position.X) < 0.75f && MathF.Abs(eyePosition.Z - door.Position.Z) < 0.75f && eyePosition.Y < door.Position.Y + 2.4f) return true;
+        foreach (var vehicle in vehicles)
+            if (!vehicle.IsPlayerDriven && Vector3.Distance(new Vector3(eyePosition.X, vehicle.Position.Y, eyePosition.Z), vehicle.Position) < (vehicle.Kind == VehicleKind.Airplane ? 3.2f : 1.6f)) return true;
+        foreach (var npc in npcs)
+            if (Vector3.Distance(new Vector3(eyePosition.X, npc.Position.Y, eyePosition.Z), npc.Position) < 0.65f) return true;
+        return false;
     }
 
     public void SetBlock(Vector3i pos, BlockType type, bool persistent)
@@ -665,10 +783,20 @@ public sealed class WorldManager
 
     private void BuildAirport()
     {
-        BuildRoad(56, 132, -4, 4);
-        for (var x = 56; x < 132; x++) for (var z = -16; z <= -10; z++) SetCityBlock(new Vector3i(x, 0, z), BlockType.Runway);
+        BuildRoad(56, 165, -4, 4);
+        for (var x = 56; x < 190; x++) for (var z = -18; z <= -8; z++) SetCityBlock(new Vector3i(x, 0, z), BlockType.Runway);
+        for (var x = 60; x < 186; x += 9)
+        {
+            Signs.Add(new DetailCube(new Vector3(x, 0.18f, -13), new Vector3(4.8f, 0.08f, 0.28f), new Vector4(1f, 1f, 1f, 1)));
+            Signs.Add(new DetailCube(new Vector3(x, 0.42f, -7.1f), new Vector3(0.6f, 0.55f, 0.6f), new Vector4(0.2f, 0.55f, 1f, 1)));
+            Signs.Add(new DetailCube(new Vector3(x, 0.42f, -18.9f), new Vector3(0.6f, 0.55f, 0.6f), new Vector4(1f, 0.82f, 0.22f, 1)));
+        }
+        Signs.Add(new DetailCube(new Vector3(61, 0.2f, -11), new Vector3(5.2f, 0.1f, 0.42f), new Vector4(1f, 1f, 1f, 1)));
+        Signs.Add(new DetailCube(new Vector3(61, 0.2f, -15), new Vector3(5.2f, 0.1f, 0.42f), new Vector4(1f, 1f, 1f, 1)));
+        Signs.Add(new DetailCube(new Vector3(61, 0.25f, -13), new Vector3(0.55f, 0.12f, 3.8f), new Vector4(1f, 1f, 1f, 1)));
         BuildPublicBuilding("airport-terminal", new Vector3i(63, 1, -34), new Vector3i(24, 5, 10), BlockType.Glass, new Vector4(0.4f, 0.8f, 1f, 1));
         BuildPublicBuilding("warehouse-a", new Vector3i(72, 1, 20), new Vector3i(18, 5, 14), BlockType.Concrete, new Vector4(0.75f, 0.75f, 0.7f, 1));
+        Signs.Add(new DetailCube(new Vector3(70, 1.1f, 17.8f), new Vector3(7f, 0.65f, 2.2f), new Vector4(0.52f, 0.52f, 0.55f, 1)));
         BuildPublicBuilding("hangar-a", new Vector3i(98, 1, -35), new Vector3i(22, 8, 15), BlockType.Concrete, new Vector4(0.55f, 0.58f, 0.62f, 1));
     }
 
@@ -777,6 +905,8 @@ public sealed class Vehicle
     [JsonConverter(typeof(JsonStringEnumConverter))] public VehicleKind Kind { get; set; }
     public Vector3 Position { get; set; }
     public float Yaw { get; set; }
+    public float Pitch { get; set; }
+    public float Roll { get; set; }
     public float Speed { get; set; }
     public bool IsPlayerDriven { get; set; }
     public bool IsTraffic { get; set; }
@@ -784,18 +914,46 @@ public sealed class Vehicle
     public bool RequestTakeoff { get; set; }
     public Vector4 Color { get; set; } = new(0.9f, 0.1f, 0.1f, 1);
     public Vector3 CameraOffset => Kind == VehicleKind.Airplane ? new Vector3(-8, 3.2f, 0) : new Vector3(-4, 2.4f, 0);
-
-    public void UpdatePlayerDrive(float dt, float throttle, float steer, bool brake)
+    public Vector3 CockpitCameraPosition
     {
-        var max = Kind == VehicleKind.Airplane ? 70f : Kind == VehicleKind.Motorcycle ? 22f : 18f;
-        Speed = Math.Clamp(Speed + throttle * max * 0.85f * dt, -8f, max);
-        if (brake) Speed *= MathF.Pow(0.05f, dt);
-        Yaw += steer * (Kind == VehicleKind.Airplane ? 30f : 95f) * dt * Math.Clamp(MathF.Abs(Speed) / 8f, 0.2f, 1.4f);
-        var dir = new Vector3(MathF.Cos(MathHelper.DegreesToRadians(Yaw)), 0, MathF.Sin(MathHelper.DegreesToRadians(Yaw)));
-        Position += dir * Speed * dt;
-        if (Kind == VehicleKind.Airplane && (RequestTakeoff || Speed > 38f)) Position += Vector3.UnitY * Math.Clamp((Speed - 32f) * 0.18f, 0, 6f) * dt;
-        if (Kind != VehicleKind.Airplane) Position = new Vector3(Position.X, 1.05f, Position.Z);
-        Speed *= MathF.Pow(0.92f, dt);
+        get
+        {
+            if (Kind != VehicleKind.Airplane) return Position + CameraOffset;
+            var yaw = MathHelper.DegreesToRadians(Yaw);
+            var forward = new Vector3(MathF.Cos(yaw), 0, MathF.Sin(yaw));
+            var right = new Vector3(-forward.Z, 0, forward.X);
+            return Position + forward * 1.15f + right * 0.05f + new Vector3(0, 1.25f, 0);
+        }
+    }
+
+    public void UpdatePlayerDrive(float dt, float throttle, float steer, bool brake, float pitchInput = 0f, float rollInput = 0f)
+    {
+        var max = Kind == VehicleKind.Airplane ? 92f : Kind == VehicleKind.Motorcycle ? 22f : 18f;
+        Speed = Math.Clamp(Speed + throttle * max * (Kind == VehicleKind.Airplane ? 0.42f : 0.85f) * dt, -8f, max);
+        if (brake && Kind != VehicleKind.Airplane) Speed *= MathF.Pow(0.05f, dt);
+        if (Kind == VehicleKind.Airplane)
+        {
+            Pitch = Math.Clamp(Pitch + pitchInput * 34f * dt, -18f, 24f);
+            Roll = Math.Clamp(Roll + rollInput * 55f * dt, -38f, 38f);
+            Yaw += (steer * 22f + Roll * 0.18f) * dt * Math.Clamp(MathF.Abs(Speed) / 28f, 0.1f, 1.4f);
+            var yaw = MathHelper.DegreesToRadians(Yaw);
+            var pitch = MathHelper.DegreesToRadians(Pitch);
+            var forward = Vector3.Normalize(new Vector3(MathF.Cos(yaw) * MathF.Cos(pitch), MathF.Sin(pitch), MathF.Sin(yaw) * MathF.Cos(pitch)));
+            Position += forward * Speed * dt;
+            var hasLift = Speed > 42f && Pitch > 4f;
+            if (!hasLift && Position.Y > 1.3f) Position += Vector3.UnitY * -9.8f * dt;
+            if (Position.Y < 1.3f) Position = new Vector3(Position.X, 1.3f, Position.Z);
+            Roll *= MathF.Pow(0.72f, dt);
+            Pitch *= MathF.Pow(0.88f, dt);
+        }
+        else
+        {
+            Yaw += steer * 95f * dt * Math.Clamp(MathF.Abs(Speed) / 8f, 0.2f, 1.4f);
+            var dir = new Vector3(MathF.Cos(MathHelper.DegreesToRadians(Yaw)), 0, MathF.Sin(MathHelper.DegreesToRadians(Yaw)));
+            Position += dir * Speed * dt;
+            Position = new Vector3(Position.X, 1.05f, Position.Z);
+        }
+        Speed *= MathF.Pow(Kind == VehicleKind.Airplane ? 0.985f : 0.92f, dt);
     }
 
     public void UpdateTraffic(float dt, IReadOnlyList<Vector3> road)
@@ -1009,6 +1167,7 @@ public sealed class ShaderProgram : IDisposable
     public void SetMatrix4(string name, Matrix4 value) => GL.UniformMatrix4(GL.GetUniformLocation(Handle, name), false, ref value);
     public void SetVector3(string name, Vector3 value) => GL.Uniform3(GL.GetUniformLocation(Handle, name), value);
     public void SetFloat(string name, float value) => GL.Uniform1(GL.GetUniformLocation(Handle, name), value);
+    public void SetInt(string name, int value) => GL.Uniform1(GL.GetUniformLocation(Handle, name), value);
     public void SetVector4(string name, Vector4 value) => GL.Uniform4(GL.GetUniformLocation(Handle, name), value);
     public void Dispose() => GL.DeleteProgram(Handle);
     private static int Compile(ShaderType type, string source)
@@ -1042,11 +1201,15 @@ public sealed class CubeRenderer : IDisposable
         GL.EnableVertexAttribArray(1);
     }
     public void Draw(Vector3 position, Vector3 scale, Vector4 color) => DrawRotated(position, scale, color, 0);
-    public void DrawRotated(Vector3 position, Vector3 scale, Vector4 color, float yaw)
+    public void DrawBlock(Vector3 position, Vector3 scale, Vector4 color, BlockType type, float ao) => DrawRotated(position, scale, color, 0, (int)type, ao);
+    public void DrawRotated(Vector3 position, Vector3 scale, Vector4 color, float yaw) => DrawRotated(position, scale, color, yaw, 0, 1f);
+    public void DrawRotated(Vector3 position, Vector3 scale, Vector4 color, float yaw, int materialKind, float ao = 1f)
     {
         var model = Matrix4.CreateScale(scale) * Matrix4.CreateRotationY(MathHelper.DegreesToRadians(-yaw)) * Matrix4.CreateTranslation(position + new Vector3(0.5f, 0.5f, 0.5f));
         _shader.SetMatrix4("model", model);
         _shader.SetVector4("objectColor", color);
+        _shader.SetInt("materialKind", materialKind);
+        _shader.SetFloat("voxelAo", ao);
         GL.BindVertexArray(_vao);
         GL.DrawArrays(PrimitiveType.Triangles, 0, 36);
     }

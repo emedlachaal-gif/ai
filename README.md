@@ -7,12 +7,12 @@ BlockHaven 3D est un jeu PC **solo offline** en C#/.NET 8 avec rendu OpenGL via 
 - Vue **vraiment 3D à la première personne** avec souris, ZQSD/WASD, sprint, gravité, chute et vol uniquement en mode créatif.
 - Monde voxel procédural avec forêt/nature, montagne, rivière, ville préfaite et blocs modifiables.
 - Ville type Brookhaven au spawn : routes, lampadaires, maison starter, villas achetables, hôpital, police station, magasin et portes animées ouvrables.
-- Zone aviation complète : terminal, entrepôt, hangar, piste, avion pilotable et décollage avec vue joueur.
+- Zone aviation complète : terminal vitré, entrepôt avec rampe, hangar avec porte, piste très longue avec marquages, balises lumineuses et avion pilotable en vue cockpit.
 - Gameplay Minecraft-like : casser/poser des blocs, matériaux terre/pierre/bois/verre, inventaire et mode créatif/survie simple.
 - Véhicules : voiture, moto, avion, entrée/sortie véhicule et trafic PNJ simple.
 - PNJ : population locale, rôles (policier, médecin, commerçant, pilote, livreur), routine maison → travail → magasin → maison, humeur et argent simulé.
 - Économie : argent local, salaire métier, maisons achetables, taxes et prix dynamiques simples.
-- Graphismes style **Brookhaven / Roblox** : palette pastel saturée, shader plastique/toon, contours noirs doux, personnages PNJ détaillés façon Roblox, routes avec marquages, trottoirs, passages piétons, panneaux colorés, fontaine, ciel jour/nuit, soleil/lune, eau animée et brouillard de distance.
+- Graphismes style **Brookhaven / Roblox** avancés : shader Blinn-Phong/toon avec rim lighting dynamique, AO voxel directionnelle, matériaux procéduraux (plastique brillant, asphalte rugueux, bois veiné, béton mat), eau avec vagues animées, sky gradient aube/zénith/crépuscule/nuit, lune/étoiles simulées, brouillard exponentiel, contours noirs doux, PNJ détaillés façon R15, routes avec marquages, trottoirs, passages piétons, panneaux colorés et fontaine.
 - Sauvegarde locale exacte des modifications et états dans le dossier de l'exécutable :
   - `Saves/world.json`
   - `Saves/player.json`
@@ -37,7 +37,10 @@ BlockHaven 3D est un jeu PC **solo offline** en C#/.NET 8 avec rendu OpenGL via 
 | Entrer/sortir véhicule | `E` près d’un véhicule |
 | Acheter maison proche | `H` |
 | Recevoir salaire métier démo | `J` |
-| Avion : demander décollage | `R` dans l'avion, puis accélérer sur la piste |
+| Avion : turbines / freinage | `Z`/`W` pour accélérer, `S` pour freiner |
+| Avion : lacet | `Q`/`A`, `D` |
+| Avion : tangage | `Space`/`↑` pour lever le nez, `Shift`/`↓` pour baisser |
+| Avion : roulis | `←`, `→` |
 | Sauvegarder | `F5` |
 | Pause / libérer souris | `Esc` |
 
@@ -62,10 +65,10 @@ L'exécutable sera dans `Builds/Windows/BlockHaven3D.exe`.
 
 ## Architecture
 
-- `BlockHavenGame` : boucle principale, entrée clavier/souris, rendu FPS 3D, shader toon/plastique et modèles PNJ/véhicules avec contours.
+- `BlockHavenGame` : boucle principale, entrée clavier/souris, rendu FPS 3D, shader Blinn-Phong/toon, sky gradient, fog exponentiel, vue cockpit, head bobbing et modèles PNJ/véhicules avec contours.
 - `WorldManager` : monde voxel, ville Brookhaven-like, détails de rue Roblox, airport, maisons, portes animées, raycast blocs et persistance des modifications.
 - `SaveManager` : sauvegardes JSON offline dans `Saves/`.
 - `NpcManager` : routines PNJ et simulation ville.
 - `EconomyManager` : argent, achats, salaires et taxes.
-- `Vehicle` : voiture/moto/avion, conduite et décollage.
+- `Vehicle` : voiture/moto/avion, cockpit, vitesse de portance, tangage, roulis, lacet, freinage et décollage conditionnel.
 - `ShaderProgram` / `CubeRenderer` : rendu OpenGL simple avec lumière jour/nuit.
